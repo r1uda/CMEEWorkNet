@@ -34,7 +34,14 @@ def state(db, member, filters=None):
     all_shifts = bool(setting(db, 'share_schedule')) or can(member, 'can_manage_schedule') or can(member,'can_manage_members')
     me = dict(member)
     me['caps'] = json.loads(me['caps'])
-    me['home_order'] = setting(db, 'home_order:' + member['id']) or []
+    preference = setting(db, 'home_order:' + member['id']) or []
+    # Older rows stored a bare order array; newer rows store {order, hidden}.
+    if isinstance(preference, dict):
+        me['home_order'] = preference.get('order') or []
+        me['home_hidden'] = preference.get('hidden') or []
+    else:
+        me['home_order'] = preference
+        me['home_hidden'] = []
     members = rows(db, 'SELECT id,name' + (',email,caps,active' if can(member, 'can_manage_members') else '') + ' FROM members ORDER BY rowid')
     for person in members:
         person['duties'] = DUTIES.get(person['id'], '')
@@ -100,9 +107,13 @@ def save_home_order(db, member, body):
     require(isinstance(order, list) and len(order) == len(HOME_BLOCKS)
             and all(isinstance(item, str) for item in order)
             and set(order) == set(HOME_BLOCKS), '板块顺序无效，请刷新后重试')
+    hidden = body.get('hidden', [])
+    require(isinstance(hidden, list) and all(isinstance(item, str) for item in hidden)
+            and set(hidden) <= set(HOME_BLOCKS), '隐藏板块无效，请刷新后重试')
+    value = dict(order=order, hidden=[name for name in HOME_BLOCKS if name in hidden])
     db.execute('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
-               ('home_order:' + member['id'], js(order)))
-    return dict(order=order)
+               ('home_order:' + member['id'], js(value)))
+    return dict(order=order, hidden=value['hidden'])
 
 
 def save_record(db, member, body, *, administrative=False):

@@ -136,3 +136,17 @@ dialog[open]{display:flex;flex-direction:column;max-height:calc(100dvh - 24px);o
 [data-unread-count][hidden],[data-unread-dot][hidden]{display:none!important}.bottom-nav .nav-icon{position:relative}.bottom-nav .nav-count{position:absolute;right:-12px;top:-6px;font-size:10px;min-width:16px;line-height:16px}.notice-feed{margin-bottom:18px}.notice-feed .prewrap{overflow-wrap:anywhere;margin:8px 0}.notice-feed .grow{min-width:0}
 
 .public-reply-choices{border:0;padding:0;margin:18px 0}.public-reply-choices legend{font-weight:600;margin-bottom:9px}.public-reply-choice{display:flex;align-items:flex-start;gap:12px;border:1px solid var(--line,#dce3d7);border-radius:10px;padding:12px;margin:8px 0;cursor:pointer}.public-reply-choice:has(input:checked){border-color:#205647;background:#eef5ef}.public-reply-choice input{flex:0 0 auto;margin-top:5px;width:18px;height:18px;accent-color:#205647}.public-reply-choice span{min-width:0}.public-reply-choice strong,.public-reply-choice small{display:block}.public-reply-choice small{margin-top:4px;color:#68766f;line-height:1.5}#public-target-field[hidden]{display:none}.public-offers h4{margin:0 0 5px}.public-offer{gap:12px;flex-wrap:wrap}.public-offer .row{flex-wrap:wrap}.public-offer p{overflow-wrap:anywhere}
+
+/* 界面收敛：折叠分组与紧凑交接行（仅复用现有 token，无新增颜色/字号） */
+.fold{border-top:1px solid var(--line)}
+.fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 22px;font-size:12px;font-weight:600;color:var(--ink)}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary::after{content:'▸';color:var(--muted);font-size:11px;transition:transform .15s}
+.fold[open]>summary::after{transform:rotate(90deg)}
+.fold .card-body{padding:0 22px 14px}
+.request-box.compact{padding:12px 22px;line-height:1.6}
+.request-box.compact .handoff-title{font-size:12px;font-weight:600;overflow-wrap:anywhere}
+.request-box.compact .handoff-sub{margin-top:5px;gap:10px;font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.request-box.compact .handoff-sub .row{gap:6px;flex-wrap:wrap}
+
+.home-widget.is-hidden{border-style:dashed;border-color:#d9e4cf}
