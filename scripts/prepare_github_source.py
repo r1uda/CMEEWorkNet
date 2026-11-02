@@ -58,7 +58,7 @@ def main():
                     count=len(paths), bytes=archive.stat().st_size,
                     sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
                     local_secret_scan='passed', published=False,
-                    planned_repo='r1uda/cmee-work', collaborator='HwangXP')
+                    planned_repo='r1uda/CMEEWorkNet', collaborator='HwangXP')
     (DEST / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), 'utf-8')
     print(json.dumps({k: v for k, v in manifest.items() if k != 'files'}, ensure_ascii=False))
 
