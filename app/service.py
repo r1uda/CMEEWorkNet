@@ -186,7 +186,9 @@ def save_record(db, member, body, *, administrative=False):
             db.execute('INSERT INTO tasks VALUES (?,?,?,?,1,?)',(task_id,record_id,text,status,owner_id))
         db.execute('INSERT INTO task_positions VALUES (?,?) ON CONFLICT(task_id) DO UPDATE SET position=excluded.position',(task_id,position))
     saved = record_view(db,row(db,'SELECT * FROM registrations WHERE id=?',(record_id,)))
-    db.execute('INSERT INTO record_history VALUES (?,?,?,?,?)',(uid(),record_id,member['id'],js(saved),stamp))
+    # Draft autosaves fire on every keystroke pause; only submitted states deserve a version.
+    if desired_state == 'submitted':
+        db.execute('INSERT INTO record_history VALUES (?,?,?,?,?)',(uid(),record_id,member['id'],js(saved),stamp))
     if shift_id and desired_state == 'submitted':
         invalidate_mail(db,shift_id)
     audit(db,member['id'],'record.admin_edit' if administrative else 'record.save',dict(id=record_id,state=desired_state,version=saved['version'],reason=body.get('change_reason','') if administrative else ''))
