@@ -21,7 +21,8 @@ def source_files():
             if not path.is_file() or '__pycache__' in path.parts:
                 continue
             rel = path.relative_to(ROOT).as_posix()
-            if rel in ('app/mail_smoke.py', 'deploy/README.md'):
+            if rel in ('app/mail_smoke.py', 'deploy/README.md',
+                       'deploy/finish_deployment.py', 'deploy/verify_connections.py'):
                 continue
             if path.suffix.lower() not in {'.py', '.sql', '.js', '.cjs', '.css', '.html', '.svg', '.png', '.webmanifest', '.sh', '.service', '.timer'} and path.name != 'Caddyfile':
                 raise RuntimeError(f'Unexpected source file requires review: {rel}')
