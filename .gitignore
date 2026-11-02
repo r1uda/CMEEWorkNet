@@ -18,8 +18,11 @@ tmp/
 *.key
 # Local handoff records contain member details and cloud-account information.
 docs/*
-!docs/Э������.md
+!docs/协作开发.md
 deploy/README.md
+# One-off deployment scripts: cloud host account paths and a temporary public key.
+deploy/finish_deployment.py
+deploy/verify_connections.py
 scripts/*
 !scripts/prepare_github_source.py
 # One-off production mail verification contains private recipient addresses.
