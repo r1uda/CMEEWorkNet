@@ -116,6 +116,12 @@ def save_home_order(db, member, body):
     return dict(order=order, hidden=value['hidden'])
 
 
+def history_signature(record):
+    tasks = [(t.get('id') or t.get('text'), t.get('text'), t.get('status')) for t in record.get('tasks', [])]
+    return js(dict(state=record.get('state'), notes=record.get('notes'), date=record.get('date'),
+                   slot=record.get('slot'), tasks=tasks))
+
+
 def save_record(db, member, body, *, administrative=False):
     permit(member, 'can_manage_members' if administrative else 'can_register')
     require('author_id' not in body, '作者身份由服务器确定', 403)
@@ -187,8 +193,12 @@ def save_record(db, member, body, *, administrative=False):
         db.execute('INSERT INTO task_positions VALUES (?,?) ON CONFLICT(task_id) DO UPDATE SET position=excluded.position',(task_id,position))
     saved = record_view(db,row(db,'SELECT * FROM registrations WHERE id=?',(record_id,)))
     # Draft autosaves fire on every keystroke pause; only submitted states deserve a version.
+    # A save that changes nothing must not add a version either.
     if desired_state == 'submitted':
-        db.execute('INSERT INTO record_history VALUES (?,?,?,?,?)',(uid(),record_id,member['id'],js(saved),stamp))
+        last = row(db,'SELECT snapshot FROM record_history WHERE registration_id=?'
+                       ' ORDER BY created_at DESC,rowid DESC LIMIT 1',(record_id,))
+        if not last or history_signature(json.loads(last['snapshot'])) != history_signature(saved):
+            db.execute('INSERT INTO record_history VALUES (?,?,?,?,?)',(uid(),record_id,member['id'],js(saved),stamp))
     if shift_id and desired_state == 'submitted':
         invalidate_mail(db,shift_id)
     audit(db,member['id'],'record.admin_edit' if administrative else 'record.save',dict(id=record_id,state=desired_state,version=saved['version'],reason=body.get('change_reason','') if administrative else ''))
