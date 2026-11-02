@@ -1,0 +1,15 @@
+[Unit]
+Description=CMEE daily consistent database backup
+
+[Service]
+Type=oneshot
+User=cmee
+Group=cmee
+WorkingDirectory=/opt/cmee
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m app.manage backup
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/cmee/data /opt/cmee/backups

@@ -1,0 +1,27 @@
+[Unit]
+Description=CMEE workbench
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cmee
+Group=cmee
+WorkingDirectory=/opt/cmee
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=HOST=127.0.0.1
+Environment=PORT=8765
+Environment=COOKIE_SECURE=true
+ExecStart=/usr/bin/python3 -m app.server --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/cmee/data /opt/cmee/backups
+
+[Install]
+WantedBy=multi-user.target

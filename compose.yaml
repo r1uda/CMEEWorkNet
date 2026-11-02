@@ -1,0 +1,17 @@
+services:
+  workbench:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8765
+      DATABASE_PATH: data/workbench.sqlite3
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - workbench-data:/workspace/data
+      - workbench-backups:/workspace/backups
+volumes:
+  workbench-data:
+  workbench-backups:

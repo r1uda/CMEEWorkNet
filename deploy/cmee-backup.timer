@@ -1,0 +1,10 @@
+[Unit]
+Description=CMEE daily backup timer
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
