@@ -157,4 +157,4 @@ dialog[open]{display:flex;flex-direction:column;max-height:calc(100dvh - 24px);o
 .task-input.collapsed textarea{display:none}
 .task-input.collapsed .task-input-bottom{display:none}
 .handoff-inline{flex:1 0 100%;display:grid;gap:10px;margin-top:10px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
-.task-input-bottom{flex-wrap:wrap}
+.handoff-inline[hidden]{display:none}
