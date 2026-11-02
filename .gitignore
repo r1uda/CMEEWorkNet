@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+data/*
+!data/.gitkeep
+backups/
+.venv/
+test-results/
+output/
+tmp/
+*.sqlite3
+*.sqlite3-*
+*.db
+*.apk
+*.pem
+*.key
+# Local handoff records contain member details and cloud-account information.
+docs/*
+!docs/Э������.md
+deploy/README.md
+scripts/*
+!scripts/prepare_github_source.py
+# One-off production mail verification contains private recipient addresses.
+app/mail_smoke.py
