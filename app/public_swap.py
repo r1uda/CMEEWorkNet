@@ -18,10 +18,16 @@ def available(db, shift_id, owner, version):
                 and not row(db, 'SELECT id FROM registrations WHERE shift_id=?', (shift_id,)))
 
 
+def drop_mail_audience(db, public_id):
+    """The per-post mail audience is only needed while the post is open."""
+    db.execute('DELETE FROM settings WHERE key=?', ('public_swap_mail_audience:' + str(public_id),))
+
+
 def expire(db):
     for post in rows(db, "SELECT * FROM public_swaps WHERE state='open'"):
         if not available(db, post['shift_id'], post['requester_id'], post['shift_version']):
             db.execute("UPDATE public_swaps SET state='stale',decided_at=? WHERE id=?", (now(), post['id']))
+            drop_mail_audience(db, post['id'])
 
 
 def listing(db, member):
@@ -115,6 +121,7 @@ def withdraw(db, member, body):
     proposal = row(db, 'SELECT * FROM public_swap_offers WHERE id=?', (body.get('id'),))
     require(proposal and proposal['member_id'] == member['id'], '只能撤回自己的回复', 403)
     post = row(db, 'SELECT * FROM public_swaps WHERE id=?', (proposal['public_id'],))
+    require(post, '公开换班不存在', 404)
     require(post['state'] == 'open' and proposal['state'] == 'active', '该回复已结束，不能撤回', 409)
     db.execute("UPDATE public_swap_offers SET state='withdrawn' WHERE id=?", (proposal['id'],))
     workflow_mail.queue(db,'public',post['id'],'withdrawn',proposal['id'],[post['requester_id']],
@@ -131,6 +138,7 @@ def cancel(db, member, body):
     workflow_mail.queue(db,'public',post['id'],'canceled','canceled',
         [m['id'] for m in rows(db,'SELECT id FROM members WHERE active=1 AND id!=?',(member['id'],))],
         '公开换班 · 公告已取消',member['name']+' 已取消公开求换班，原排班不变。',actor_id=member['id'])
+    drop_mail_audience(db, post['id'])
     audit(db, member['id'], 'public_swap.cancel', dict(id=post['id']))
     return dict(ok=True)
 
@@ -157,4 +165,5 @@ def select(db, member, body):
     for item in rows(db, "SELECT id,state FROM public_swap_offers WHERE public_id=? AND state IN ('selected','not_selected')", (post['id'],)):
         public_swap_mail.queue(db, post['id'], item['state'], item['id'])
     audit(db, member['id'], 'public_swap.select', dict(id=post['id'], offer_id=proposal['id']))
+    drop_mail_audience(db, post['id'])
     return result

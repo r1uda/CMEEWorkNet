@@ -12,8 +12,8 @@ from unittest.mock import patch
 import xml.etree.ElementTree as ET
 import zipfile
 
-from app import ai, auth, mailer, service
-from app.core import CAPS, SLOTS, TZ, Problem, Store, digest, js, member_by_id, now, row, rows, uid
+from app import ai, auth, mailer, public_swap, service
+from app.core import CAPS, SLOTS, TZ, Problem, Store, audit, digest, js, member_by_id, now, row, rows, uid
 from app.server import App
 from app.xlsx import NS, read_schedule, workbook
 
@@ -76,6 +76,48 @@ class BusinessTests(unittest.TestCase):
             with self.subTest(order=order), self.store.write() as db:
                 with self.assertRaises(Problem):
                     service.save_home_order(db, self.user, {'order': order})
+
+    def test_client_ip_trusts_forwarded_only_from_loopback(self):
+        self.assertEqual(App.client_ip({'REMOTE_ADDR': '127.0.0.1', 'HTTP_X_FORWARDED_FOR': '203.0.113.9, 10.0.0.1'}), '203.0.113.9')
+        self.assertEqual(App.client_ip({'REMOTE_ADDR': '198.51.100.7', 'HTTP_X_FORWARDED_FOR': '203.0.113.9'}), '198.51.100.7')
+        self.assertEqual(App.client_ip({'REMOTE_ADDR': '127.0.0.1'}), '127.0.0.1')
+
+    def test_static_asset_supports_conditional_request(self):
+        def fetch(path, extra=None):
+            environ = {'REQUEST_METHOD': 'GET', 'PATH_INFO': path, 'QUERY_STRING': '',
+                       'wsgi.input': io.BytesIO(b''), 'CONTENT_LENGTH': '0'}
+            if extra:
+                environ.update(extra)
+            seen = {}
+            def start(status, headers):
+                seen.update(status=int(status.split()[0]), headers=dict(headers))
+            return seen, b''.join(App(self.store)(environ, start))
+        first, body = fetch('/app.js')
+        self.assertEqual(first['status'], 200)
+        self.assertTrue(body)
+        etag = first['headers'].get('ETag')
+        self.assertTrue(etag)
+        self.assertEqual(first['headers'].get('Cache-Control'), 'no-cache')
+        second, empty = fetch('/app.js', {'HTTP_IF_NONE_MATCH': etag})
+        self.assertEqual(second['status'], 304)
+        self.assertEqual(empty, b'')
+
+    def test_audit_detail_is_truncated(self):
+        with self.store.write() as db:
+            audit(db, 'm01', 'settings.save', {'payload': 'x' * 8000})
+        with self.store.read() as db:
+            detail = json.loads(row(db, "SELECT detail FROM audit WHERE action='settings.save'")['detail'])
+        self.assertTrue(detail.get('truncated'))
+        self.assertLess(len(detail['preview']), 4000)
+
+    def test_public_swap_audience_is_cleaned_when_canceled(self):
+        shift = self.shift(member='m01', date=self.today + dt.timedelta(days=5))
+        with self.store.write() as db:
+            created = public_swap.create(db, self.admin, dict(shift_id=shift, version=1, mail_audience=['m02']))
+            key = 'public_swap_mail_audience:' + created['id']
+            self.assertIsNotNone(row(db, 'SELECT value FROM settings WHERE key=?', (key,)))
+            public_swap.cancel(db, self.admin, dict(id=created['id']))
+            self.assertIsNone(row(db, 'SELECT value FROM settings WHERE key=?', (key,)))
 
     def shift(self,member='m02',date=None,slot=0):
         ident=uid()

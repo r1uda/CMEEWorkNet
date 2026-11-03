@@ -82,6 +82,7 @@ def decide(db, member, body):
     if decision=='accepted':
         permit(member,'can_register')
         table = 'tasks' if h['task_id'] else 'direct_tasks'
+        require(table in ('tasks', 'direct_tasks'), '处理方式无效')
         task_id = h['task_id'] or h['direct_task_id']
         task = row(db,f'SELECT * FROM {table} WHERE id=?',(task_id,))
         if not task or not task.get('active',1) or task['assignee_id']!=h['sender_id'] or task['status']!='pending':

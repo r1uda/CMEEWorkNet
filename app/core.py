@@ -115,8 +115,7 @@ class Store:
             for migration in sorted((ROOT / 'app/migrations').glob('*.sql')):
                 version = int(migration.name.split('_', 1)[0])
                 if not db.execute('SELECT 1 FROM schema_version WHERE version=?', (version,)).fetchone():
-                    for statement in migration.read_text('utf-8').split(';'):
-                        if statement.strip(): db.execute(statement)
+                    db.executescript(migration.read_text('utf-8'))
                     db.execute('INSERT INTO schema_version VALUES (?)', (version,))
             for i, name in enumerate(NAMES):
                 db.execute('INSERT OR IGNORE INTO members(id,name) VALUES (?,?)', (f'm{i+1:02}', name))
@@ -138,8 +137,15 @@ def setting(db, key):
     return json.loads(result['value']) if result else None
 
 
+AUDIT_DETAIL_LIMIT = 4000
+
+
 def audit(db, actor, action, detail):
-    db.execute('INSERT INTO audit VALUES (?,?,?,?,?)', (uid(), actor, action, js(detail), now()))
+    # A few endpoints pass whole request bodies here; keep the table small and readable.
+    text = js(detail)
+    if len(text) > AUDIT_DETAIL_LIMIT:
+        text = js(dict(truncated=True, size=len(text), preview=text[:AUDIT_DETAIL_LIMIT - 200]))
+    db.execute('INSERT INTO audit VALUES (?,?,?,?,?)', (uid(), actor, action, text, now()))
 
 
 def can(member, capability):
