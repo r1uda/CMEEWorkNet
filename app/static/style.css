@@ -195,3 +195,5 @@ dialog[open]{display:flex;flex-direction:column;max-height:calc(100dvh - 24px);o
 
 /* 手机端页头收紧：副标题只在宽屏显示 */
 @media(max-width:760px){.page-head{margin-bottom:14px}.page-head .subtitle{display:none}.page-head h1{font-size:22px}}
+
+.handoff-lock{font-size:11px;color:var(--muted)}

@@ -104,7 +104,9 @@ function initEditor(){
   return existing?{...JSON.parse(JSON.stringify(existing)),adminEditing:admin,change_reason:''}:{id:null,shift_id:selected?.id||null,date:selected?.date||today(),state:'draft',notes:'',tasks:selected&&[0,3].includes(selected.slot)?[{text:'日常卫生',status:'done'}]:[],work_mode:selected&&[0,3].includes(selected.slot)?'worked':'no_work',version:null};
 }
 function taskHandoff(t,r){if(!t.id||r.state!=='submitted')return '';const pending=(S.data?.handoffs||[]).find(h=>h.task_id===t.id&&h.state==='pending');return pending?` ${tag('交接中 · '+pending.recipient_name,'amber')}`:''}
-function taskHandoffPanel(t,r,i){const done=t.status==='done';if(!t.id||r.state!=='submitted')return `<p class="handoff-note"${done?' hidden':''}>提交这份登记后即可发起交接</p>`;if((t.assignee_id||myId())!==myId())return '';if((S.data?.handoffs||[]).some(h=>h.task_id===t.id&&h.state==='pending'))return '';return `<div class="handoff-inline"${done?' hidden':''} data-handoff-for="${E(t.id)}"><span class="handoff-label">交接给</span><select name="handoff-recipient" aria-label="接手人">${memberOptions()}</select><input name="handoff-reason" maxlength="1000" placeholder="说明（选填）" aria-label="交接说明"><button class="btn btn-primary btn-small" type="button" data-action="handoff-submit" data-id="${E(t.id)}">发起交接</button></div>`}
+function canHandoff(){return !S.dirty}
+function syncHandoffState(){const blocked=!canHandoff();document.querySelectorAll('.handoff-inline').forEach(panel=>{const button=panel.querySelector('[data-action="handoff-submit"]');if(button)button.disabled=blocked;const lock=panel.querySelector('.handoff-lock');if(lock)lock.hidden=!blocked})}
+function taskHandoffPanel(t,r,i){const done=t.status==='done';if(!t.id||r.state!=='submitted')return `<p class="handoff-note"${done?' hidden':''}>提交这份登记后即可发起交接</p>`;if((t.assignee_id||myId())!==myId())return '';if((S.data?.handoffs||[]).some(h=>h.task_id===t.id&&h.state==='pending'))return '';return `<div class="handoff-inline"${done?' hidden':''} data-handoff-for="${E(t.id)}"><span class="handoff-label">交接给</span><select name="handoff-recipient" aria-label="接手人">${memberOptions()}</select><input name="handoff-reason" maxlength="1000" placeholder="说明（选填）" aria-label="交接说明"><button class="btn btn-primary btn-small" type="button" data-action="handoff-submit" data-id="${E(t.id)}"${S.dirty?' disabled':''}>发起交接</button><span class="handoff-lock"${S.dirty?'':' hidden'}>先保存修改</span></div>`}
 function editor(){
   if(!can('can_register')&&!(can('can_manage_members')&&S.params.admin==='1'))return empty('当前账号没有登记权限。','shield');
   if(!S.editor){S.editor=restoreEditor();taskCollapsed=new Set()}const r=S.editor;if(!r)return empty('记录不存在或无权修改。','shield');
@@ -275,7 +277,7 @@ function forgetEditor(key){
 function restoreEditor(){
   const base=initEditor();if(!base)return null;
   const {id,shift}=S.params,admin=!!base.adminEditing;
-  const draft=id||shift?[...editorDrafts.values()].find(d=>d.owner===myId()&&!!d.editor.adminEditing===admin&&(id?d.editor.id===id:d.editor.shift_id===shift)):[...editorDrafts.values()].find(d=>d.owner===myId()&&!d.editor.adminEditing&&!d.editor.id);
+  const draft=id||shift?[...editorDrafts.values()].find(d=>d.owner===myId()&&!!d.editor.adminEditing===admin&&(id?d.editor.id===id:d.editor.shift_id===shift)):[...editorDrafts.values()].find(d=>d.owner===myId()&&!d.editor.adminEditing&&d.editor.state!=='submitted');
   if(draft&&draft.owner===myId()){
     const r=draft.editor;
     // Re-check access after account/permission or schedule changes.
@@ -286,7 +288,7 @@ function restoreEditor(){
   S.dirty=false;return base;
 }
 function dirty(){
-  S.dirty=true;rememberEditor();
+  S.dirty=true;rememberEditor();syncHandoffState();
   if($('#save-indicator'))$('#save-indicator').textContent='填写内容已在当前页面保留 · 尚未提交';
   clearTimeout(S.saveTimer);
   if(S.editor?.state==='draft')S.saveTimer=setTimeout(()=>saveEditor('draft',true).catch(e=>toast('填写内容已保留，服务器草稿尚未保存：'+e.message,true)),1500);
@@ -392,7 +394,7 @@ case 'message-read':await mutate('messages/mark',{id,kind:'read'},'已标为已�
 case 'message-confirm':await mutate('messages/mark',{id,kind:'confirm'},'已确认收到');break;
 case 'swap-decide':case 'handoff-decide':{const decision=button.dataset.decision,isSwap=a==='swap-decide';confirmAction(decision==='accept'?'确认接受':'确认拒绝',isSwap?(decision==='accept'?'接受后会更新实际排班与登记责任。':'拒绝后原排班继续有效。'):(decision==='accept'?'接受后，你将成为该事务的当前处理人。':'拒绝后，事务仍由原处理人负责。'),'',()=>mutate(isSwap?'swaps/decide':'handoffs/decide',{id,decision},decision==='accept'?'已接受':'已拒绝'));break}
 case 'work-mode':{if(S.saving)await S.saving;S.editor=collectEditor();const apply=()=>{S.editor.work_mode=button.dataset.mode;S.editor.tasks=button.dataset.mode==='no_work'?[]:S.editor.tasks.length?S.editor.tasks:[{text:'',status:'done'}];S.changeVersion=(S.changeVersion||0)+1;closeModal();render();dirty();$('#task-0')?.focus()};if(button.dataset.mode==='no_work'&&S.editor.tasks.some(t=>t.text.trim()))confirmAction('切换为没工作','这会清空当前登记中的事务内容；保存后会留修改历史。','',apply,'确认清空');else apply();break}
-case 'handoff-submit':{const box=button.closest('.task-input');const recipient=box?.querySelector('select[name="handoff-recipient"]')?.value;const reason=box?.querySelector('input[name="handoff-reason"]')?.value||'';if(!recipient)throw Error('请选择接手人');button.disabled=true;try{await api('handoffs/create',{task_id:id,recipient_id:recipient,reason});await reload(false);render();toast('交接已发起，等待对方确认')}finally{button.disabled=false}break}
+case 'handoff-submit':{if(!canHandoff())throw Error('请先保存修改，再发起交接');const box=button.closest('.task-input');const recipient=box?.querySelector('select[name="handoff-recipient"]')?.value;const reason=box?.querySelector('input[name="handoff-reason"]')?.value||'';if(!recipient)throw Error('请选择接手人');button.disabled=true;try{await api('handoffs/create',{task_id:id,recipient_id:recipient,reason});await reload(false);render();toast('交接已发起，等待对方确认')}finally{button.disabled=false}break}
 case 'task-expand':{taskCollapsed.delete(Number(button.dataset.index));render();break}
 case 'add-task':if(S.saving)await S.saving;S.editor=collectEditor();S.editor.work_mode='worked';const openBefore=S.editor.tasks.length;taskCollapsed=new Set(Array.from({length:openBefore},(_,k)=>k));S.editor.tasks.push({text:'',status:'done'});S.changeVersion=(S.changeVersion||0)+1;render();dirty();break;
 case 'remove-task':if(S.saving)await S.saving;S.editor=collectEditor();S.editor.tasks.splice(Number(button.dataset.index),1);if(!S.editor.tasks.length)S.editor.work_mode='no_work';S.changeVersion=(S.changeVersion||0)+1;render();dirty();break;
@@ -441,7 +443,7 @@ window.addEventListener('resize',()=>{const wide=window.innerWidth>760;if(wide!=
 document.addEventListener('submit',event=>{const form=event.target;if(form.matches('form'))onSubmit(form,event).catch(e=>toast(e.message,true))});
 document.addEventListener('input',event=>{if(event.target.closest('#record-form')){S.changeVersion=(S.changeVersion||0)+1;dirty()}});
 document.addEventListener('change',event=>{if(event.target.id==='swap-req-recipient')fillSwapRequestTargets()});
-document.addEventListener('change',event=>{const statusSelect=event.target.closest('#task-inputs select[name="task-status"]');if(statusSelect){const box=statusSelect.closest('.task-input');box?.querySelectorAll('.handoff-inline,.handoff-note').forEach(el=>{el.hidden=statusSelect.value!=='pending'})}});
+document.addEventListener('change',event=>{const statusSelect=event.target.closest('#task-inputs select[name="task-status"]');if(statusSelect){const box=statusSelect.closest('.task-input');box?.querySelectorAll('.handoff-inline,.handoff-note').forEach(el=>{el.hidden=statusSelect.value!=='pending'});S.changeVersion=(S.changeVersion||0)+1;dirty()}});
 document.addEventListener('change',event=>{if(event.target.id==='handoff-task'){$('#handoff-new-text').hidden=!!event.target.value;$('#handoff-text').required=!event.target.value;}if(event.target.id==='swap-recipient')updateSwapTargets();if(event.target.id==='record-shift'){S.editor=collectEditor();const shift=S.data.shifts.find(s=>s.id===S.editor.shift_id);S.editor.date=shift?.date||today();if(!S.editor.id&&!S.editor.tasks.length&&shift&&[0,3].includes(shift.slot)){S.editor.tasks=[{text:'日常卫生',status:'done'}];S.editor.work_mode='worked'}render();dirty()}});
 window.addEventListener('beforeunload',event=>{if(S.dirty||S.saving||[...editorDrafts.values()].some(d=>d.dirty)){event.preventDefault();event.returnValue=''}});
 window.addEventListener('hashchange',async()=>{stopHomeDrag(true);S.homeSort=null;clearTimeout(S.saveTimer);if(S.page==='register')rememberEditor();S.editor=null;S.dirty=false;taskCollapsed=new Set();closeModal();route();const intendedHash=location.hash;if(S.data&&['schedule','messages','workload'].includes(S.page)){try{await reload(false)}catch(e){toast('更新数据失败：'+e.message,true)}if(location.hash!==intendedHash)return}if(S.page==='schedule'&&/^\d{4}-\d{2}-\d{2}$/.test(S.params.date||'')){const base=dayAdd(today(),-((dateObj(today()).getUTCDay()+6)%7));S.week=Math.floor((dateObj(S.params.date)-dateObj(base))/604800000)}render();window.scrollTo(0,0)});
