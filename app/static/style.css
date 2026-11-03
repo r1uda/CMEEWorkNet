@@ -187,3 +187,8 @@ dialog[open]{display:flex;flex-direction:column;max-height:calc(100dvh - 24px);o
 .record-card strong{font-size:12px;font-weight:600}
 .record-card small{color:var(--muted);font-size:11px}
 @media(max-width:760px){.records-table-wrap{display:none}.records-cards{display:block}}
+
+/* 手机端：筛选折叠（桌面仍走 flex + contents） */
+.filter-toggle{display:none}
+.filter-advanced{display:contents}
+@media(max-width:760px){.filter-bar{display:block;padding:15px}.filter-bar .field{min-width:0;margin:0 0 10px}.filter-bar .field.search{min-width:0}.filter-toggle{display:inline-flex;margin:0 0 10px}.filter-advanced{display:none}.filter-advanced.open{display:grid;grid-template-columns:1fr 1fr;gap:10px}.filter-advanced .field{margin:0}.filter-advanced .btn{width:100%}}
