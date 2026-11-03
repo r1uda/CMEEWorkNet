@@ -77,6 +77,35 @@ class BusinessTests(unittest.TestCase):
                 with self.assertRaises(Problem):
                     service.save_home_order(db, self.user, {'order': order})
 
+    def test_home_hidden_is_saved_and_unknown_blocks_rejected(self):
+        order = list(reversed(service.HOME_BLOCKS))
+        with self.store.write() as db:
+            service.save_home_order(db, self.user, {'order': order, 'hidden': ['notices', 'recent']})
+        with self.store.read() as db:
+            me = service.state(db, self.user)['me']
+            self.assertEqual(me['home_order'], order)
+            self.assertEqual(me['home_hidden'], ['recent', 'notices'])
+            self.assertEqual(service.state(db, self.other)['me']['home_hidden'], [])
+        with self.store.write() as db:
+            with self.assertRaises(Problem):
+                service.save_home_order(db, self.user, {'order': order, 'hidden': ['stats']})
+
+    def test_unchanged_submitted_save_does_not_add_history(self):
+        record = self.save(tasks=[dict(text='整理资料', status='pending')])
+        task_id = record['tasks'][0]['id']
+        body = dict(id=record['id'], version=record['version'], date=str(self.today), state='submitted',
+                    notes='', tasks=[dict(id=task_id, text='整理资料', status='pending')])
+        with self.store.read() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM record_history').fetchone()[0], 1)
+        with self.store.write() as db:
+            updated = service.save_record(db, self.user, body)
+        with self.store.read() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM record_history').fetchone()[0], 1)
+        with self.store.write() as db:
+            service.save_record(db, self.user, dict(body, version=updated['version'], notes='补充'))
+        with self.store.read() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM record_history').fetchone()[0], 2)
+
     def shift(self,member='m02',date=None,slot=0):
         ident=uid()
         with self.store.write() as db:
