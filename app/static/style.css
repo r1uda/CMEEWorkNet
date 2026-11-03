@@ -174,3 +174,5 @@ dialog[open]{display:flex;flex-direction:column;max-height:calc(100dvh - 24px);o
 .history-detail summary::after{content:' ▾'}
 .history-detail[open] summary::after{content:' ▴'}
 .history-detail pre{margin-top:8px}
+
+.records-scope{display:flex;gap:8px;padding:16px 22px 0}
