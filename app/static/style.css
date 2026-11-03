@@ -180,3 +180,10 @@ dialog[open]{display:flex;flex-direction:column;max-height:calc(100dvh - 24px);o
 .tabs{overflow-y:hidden}
 
 @media(max-width:760px){.records-scope{padding:16px 15px 0}}
+
+/* 事务记录：手机端用紧凑卡片，桌面保留表格 */
+.records-cards{display:none}
+.record-card{display:block;padding:12px 14px;border:1px solid var(--line);border-radius:9px;background:var(--card);margin-bottom:8px}
+.record-card strong{font-size:12px;font-weight:600}
+.record-card small{color:var(--muted);font-size:11px}
+@media(max-width:760px){.records-table-wrap{display:none}.records-cards{display:block}}
