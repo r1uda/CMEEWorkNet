@@ -71,6 +71,43 @@ def slot_end(shift):
     return dt.datetime.fromisoformat(f"{shift['date']}T{SLOTS[shift['slot']]['end']}:00+08:00")
 
 
+def sql_statements(script):
+    """Split a .sql file into complete statements.
+
+    sqlite3.complete_statement() understands quotes, comments and triggers, so a
+    semicolon inside a string does not break the split (unlike a naive split(';')).
+    """
+    buffer = ''
+    for line in script.splitlines(keepends=True):
+        buffer += line
+        if sqlite3.complete_statement(buffer):
+            text = buffer.strip()
+            if text:
+                yield text
+            buffer = ''
+    tail = buffer.strip()
+    if tail:
+        yield tail
+
+
+def apply_migrations(db, folder):
+    """Run pending migrations inside the caller's transaction.
+
+    executescript() would implicitly commit the surrounding transaction, so a failure
+    halfway left partial DDL behind. Executing statement by statement keeps the
+    migration and its schema_version row atomic: either both land or neither does.
+    """
+    current = db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]
+    require(current <= CURRENT_SCHEMA_VERSION, '数据库版本高于当前应用，请使用对应版本的代码')
+    for migration in sorted(Path(folder).glob('*.sql')):
+        version = int(migration.name.split('_', 1)[0])
+        if db.execute('SELECT 1 FROM schema_version WHERE version=?', (version,)).fetchone():
+            continue
+        for statement in sql_statements(migration.read_text('utf-8')):
+            db.execute(statement)
+        db.execute('INSERT INTO schema_version VALUES (?)', (version,))
+
+
 class Store:
     def __init__(self, path):
         self.path = str(path)
@@ -110,13 +147,7 @@ class Store:
             db.executescript((ROOT / 'app/schema.sql').read_text('utf-8'))
             db.commit()
         with self.write() as db:
-            current = db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]
-            require(current <= CURRENT_SCHEMA_VERSION, '数据库版本高于当前应用，请使用对应版本的代码')
-            for migration in sorted((ROOT / 'app/migrations').glob('*.sql')):
-                version = int(migration.name.split('_', 1)[0])
-                if not db.execute('SELECT 1 FROM schema_version WHERE version=?', (version,)).fetchone():
-                    db.executescript(migration.read_text('utf-8'))
-                    db.execute('INSERT INTO schema_version VALUES (?)', (version,))
+            apply_migrations(db, ROOT / 'app/migrations')
             for i, name in enumerate(NAMES):
                 db.execute('INSERT OR IGNORE INTO members(id,name) VALUES (?,?)', (f'm{i+1:02}', name))
             for key, value in [('activation_date', None), ('share_records', False), ('share_schedule', False), ('ai_consent', False), ('escalation_recipient', None)]:

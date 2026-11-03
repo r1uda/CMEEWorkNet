@@ -12,7 +12,7 @@ from unittest.mock import patch
 import xml.etree.ElementTree as ET
 import zipfile
 
-from app import ai, auth, mailer, public_swap, service
+from app import ai, auth, core, mailer, public_swap, service
 from app.core import CAPS, SLOTS, TZ, Problem, Store, audit, digest, js, member_by_id, now, row, rows, uid
 from app.server import App
 from app.xlsx import NS, read_schedule, workbook
@@ -70,6 +70,24 @@ class BusinessTests(unittest.TestCase):
         self.assertEqual(mailer.queue_due(self.store, at), 0)
         with self.store.read() as db:
             self.assertEqual(row(db, 'SELECT status FROM outbox')['status'], 'canceled')
+
+    def test_failed_migration_rolls_back_and_can_be_retried(self):
+        with tempfile.TemporaryDirectory(prefix='mig-', dir=Path(__file__).resolve().parent) as tmp:
+            folder = Path(tmp)
+            broken = folder / '012_probe.sql'
+            broken.write_text('CREATE TABLE review_probe(id INTEGER);\nINSERT INTO missing_table VALUES(1);\n', encoding='utf-8')
+            with self.assertRaises(sqlite3.OperationalError):
+                with self.store.write() as db:
+                    core.apply_migrations(db, folder)
+            with self.store.read() as db:
+                self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='review_probe'").fetchone())
+                self.assertIsNone(db.execute('SELECT 1 FROM schema_version WHERE version=12').fetchone())
+            broken.write_text('CREATE TABLE review_probe(id INTEGER);\n', encoding='utf-8')
+            with self.store.write() as db:
+                core.apply_migrations(db, folder)
+            with self.store.read() as db:
+                self.assertIsNotNone(db.execute('SELECT 1 FROM schema_version WHERE version=12').fetchone())
+                self.assertIsNotNone(db.execute("SELECT name FROM sqlite_master WHERE name='review_probe'").fetchone())
 
     def test_home_order_rejects_invalid_blocks(self):
         for order in (None, [], ['pending'] * 6, list(service.HOME_BLOCKS[:-1]) + ['stats'], [{}] * 6):
