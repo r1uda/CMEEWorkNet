@@ -152,7 +152,7 @@ dialog[open]{display:flex;flex-direction:column;max-height:calc(100dvh - 24px);o
 .home-widget.is-hidden{border-style:dashed;border-color:#d9e4cf}
 
 .task-summary{display:none}
-.task-input.collapsed .task-summary{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);cursor:pointer;font-size:12px}
+.task-input.collapsed .task-summary{display:flex;align-items:center;gap:10px;justify-content:space-between;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);cursor:pointer;font-size:12px;font-family:inherit;color:inherit;text-align:left}
 .task-input.collapsed .task-summary-text{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .task-input.collapsed textarea{display:none}
 .task-input.collapsed .task-input-bottom{display:none}
