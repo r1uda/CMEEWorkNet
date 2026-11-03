@@ -90,6 +90,23 @@ class BusinessTests(unittest.TestCase):
             with self.assertRaises(Problem):
                 service.save_home_order(db, self.user, {'order': order, 'hidden': ['stats']})
 
+    def test_unchanged_admin_save_does_not_duplicate_history(self):
+        record = self.save(tasks=[dict(text='整理资料', status='pending')])
+        task_id = record['tasks'][0]['id']
+        body = dict(id=record['id'], version=record['version'], date=str(self.today), state='submitted',
+                    notes='', tasks=[dict(id=task_id, text='整理资料', status='pending')], change_reason='无变化')
+        with self.store.write() as db:
+            service.save_record(db, self.admin, body, administrative=True)
+        with self.store.read() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM record_history').fetchone()[0], 1)
+        changed = dict(body, notes='管理员补充说明')
+        with self.store.read() as db:
+            changed['version'] = db.execute('SELECT version FROM registrations WHERE id=?', (record['id'],)).fetchone()[0]
+        with self.store.write() as db:
+            service.save_record(db, self.admin, changed, administrative=True)
+        with self.store.read() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM record_history').fetchone()[0], 2)
+
     def test_unchanged_submitted_save_does_not_add_history(self):
         record = self.save(tasks=[dict(text='整理资料', status='pending')])
         task_id = record['tasks'][0]['id']

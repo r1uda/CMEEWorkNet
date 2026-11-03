@@ -179,7 +179,11 @@ def save_record(db, member, body, *, administrative=False):
     submitted_at = (previous['submitted_at'] if previous else None) or (stamp if desired_state == 'submitted' else None)
     if previous:
         if administrative:
-            db.execute('INSERT INTO record_history VALUES (?,?,?,?,?)',(uid(),record_id,member['id'],js(record_view(db,previous)),stamp))
+            prior = record_view(db, previous)
+            prior_last = row(db,'SELECT snapshot FROM record_history WHERE registration_id=?'
+                             ' ORDER BY created_at DESC,rowid DESC LIMIT 1',(record_id,))
+            if not prior_last or history_signature(json.loads(prior_last['snapshot'])) != history_signature(prior):
+                db.execute('INSERT INTO record_history VALUES (?,?,?,?,?)',(uid(),record_id,member['id'],js(prior),stamp))
         db.execute('UPDATE registrations SET date=?,slot=?,state=?,notes=?,version=version+1,updated_at=?,submitted_at=? WHERE id=?', (date,slot,desired_state,notes,stamp,submitted_at,record_id))
     else:
         require(not shift_id or not row(db,'SELECT id FROM registrations WHERE shift_id=?',(shift_id,)), '该班次已有登记，请打开原记录修改',409)
