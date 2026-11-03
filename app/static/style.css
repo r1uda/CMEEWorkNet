@@ -176,3 +176,7 @@ dialog[open]{display:flex;flex-direction:column;max-height:calc(100dvh - 24px);o
 .history-detail pre{margin-top:8px}
 
 .records-scope{display:flex;gap:8px;padding:16px 22px 0}
+
+.tabs{overflow-y:hidden}
+
+@media(max-width:760px){.records-scope{padding:16px 15px 0}}
