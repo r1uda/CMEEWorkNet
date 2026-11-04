@@ -441,7 +441,8 @@ document.addEventListener('cmee:layout',()=>{if(S.data)render()});
 let lastWide=window.innerWidth>760;
 window.addEventListener('resize',()=>{const wide=window.innerWidth>760;if(wide!==lastWide){lastWide=wide;if(S.page==='records'&&S.data)render()}});
 document.addEventListener('submit',event=>{const form=event.target;if(form.matches('form'))onSubmit(form,event).catch(e=>toast(e.message,true))});
-document.addEventListener('input',event=>{if(event.target.closest('#record-form')){S.changeVersion=(S.changeVersion||0)+1;dirty()}});
+function editingRecordContent(target){return !!(target&&target.closest&&target.closest('#record-form')&&!target.closest('.handoff-inline'))}
+document.addEventListener('input',event=>{if(editingRecordContent(event.target)){S.changeVersion=(S.changeVersion||0)+1;dirty()}});
 document.addEventListener('change',event=>{if(event.target.id==='swap-req-recipient')fillSwapRequestTargets()});
 document.addEventListener('change',event=>{const statusSelect=event.target.closest('#task-inputs select[name="task-status"]');if(statusSelect){const box=statusSelect.closest('.task-input');box?.querySelectorAll('.handoff-inline,.handoff-note').forEach(el=>{el.hidden=statusSelect.value!=='pending'});S.changeVersion=(S.changeVersion||0)+1;dirty()}});
 document.addEventListener('change',event=>{if(event.target.id==='handoff-task'){$('#handoff-new-text').hidden=!!event.target.value;$('#handoff-text').required=!event.target.value;}if(event.target.id==='swap-recipient')updateSwapTargets();if(event.target.id==='record-shift'){S.editor=collectEditor();const shift=S.data.shifts.find(s=>s.id===S.editor.shift_id);S.editor.date=shift?.date||today();if(!S.editor.id&&!S.editor.tasks.length&&shift&&[0,3].includes(shift.slot)){S.editor.tasks=[{text:'日常卫生',status:'done'}];S.editor.work_mode='worked'}render();dirty()}});

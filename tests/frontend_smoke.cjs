@@ -46,6 +46,13 @@ S.data.me.home_hidden=['recent','notices'];
 assert.deepEqual([...homeHidden()],['recent','notices']);
 assert.equal(homeOrder()[0],'notices');assert.equal(homeOrder().length,6);
 
+// 交接栏自己的输入不算登记内容（否则选完人就自锁）
+const contentField={closest:s=>s==='#record-form'?{}:null};
+const handoffField={closest:s=>s==='.handoff-inline'?{}:(s==='#record-form'?{}:null)};
+assert.equal(editingRecordContent(contentField),true);
+assert.equal(editingRecordContent(handoffField),false);
+assert.equal(editingRecordContent(null),false);
+
 // 未保存时禁止发起交接
 S.data.handoffs=[];S.data.members=[];S.data.me.id='m01';
 const handoffTask={id:'t1',status:'pending',assignee_id:'m01'};const submitted={state:'submitted'};
