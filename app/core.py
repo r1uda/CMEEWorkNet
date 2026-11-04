@@ -74,20 +74,83 @@ def slot_end(shift):
 def sql_statements(script):
     """Split a .sql file into complete statements.
 
-    sqlite3.complete_statement() understands quotes, comments and triggers, so a
-    semicolon inside a string does not break the split (unlike a naive split(';')).
+    Splits on real statement boundaries, not on lines: two statements on one line
+    must become two, because db.execute() rejects a string holding more than one.
+    Quotes, [identifiers], -- line comments and /* block comments */ are skipped,
+    and a CREATE TRIGGER body is kept whole until sqlite3.complete_statement says
+    the trigger has ended.
     """
-    buffer = ''
-    for line in script.splitlines(keepends=True):
-        buffer += line
-        if sqlite3.complete_statement(buffer):
-            text = buffer.strip()
-            if text:
-                yield text
-            buffer = ''
-    tail = buffer.strip()
+    statements = []
+    buffer = []
+    quote = None
+    in_line_comment = in_block_comment = False
+    index, length = 0, len(script)
+    while index < length:
+        char = script[index]
+        following = script[index + 1] if index + 1 < length else ''
+        if in_line_comment:
+            buffer.append(char)
+            if char == '\n':
+                in_line_comment = False
+            index += 1
+            continue
+        if in_block_comment:
+            buffer.append(char)
+            if char == '*' and following == '/':
+                buffer.append(following)
+                index += 2
+                in_block_comment = False
+                continue
+            index += 1
+            continue
+        if quote:
+            buffer.append(char)
+            if char == quote:
+                if following == quote:
+                    buffer.append(following)
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if char == '-' and following == '-':
+            buffer.extend((char, following))
+            index += 2
+            in_line_comment = True
+            continue
+        if char == '/' and following == '*':
+            buffer.extend((char, following))
+            index += 2
+            in_block_comment = True
+            continue
+        if char in ("'", '"', '`'):
+            quote = char
+            buffer.append(char)
+            index += 1
+            continue
+        if char == '[':
+            quote = ']'
+            buffer.append(char)
+            index += 1
+            continue
+        if char == ';':
+            text = ''.join(buffer)
+            if 'trigger' in text.lower() and not sqlite3.complete_statement(text):
+                buffer.append(char)
+                index += 1
+                continue
+            statement = text.strip()
+            if statement:
+                statements.append(statement)
+            buffer = []
+            index += 1
+            continue
+        buffer.append(char)
+        index += 1
+    tail = ''.join(buffer).strip()
     if tail:
-        yield tail
+        statements.append(tail)
+    return statements
 
 
 def apply_migrations(db, folder):

@@ -71,6 +71,35 @@ class BusinessTests(unittest.TestCase):
         with self.store.read() as db:
             self.assertEqual(row(db, 'SELECT status FROM outbox')['status'], 'canceled')
 
+    def test_sql_statements_split_on_boundaries(self):
+        script = ("CREATE TABLE probe_a(id INTEGER); CREATE TABLE probe_b(id INTEGER);\n"
+                  "INSERT INTO probe_a VALUES (1);\n"
+                  "CREATE TABLE probe_c(note TEXT); INSERT INTO probe_c VALUES ('a;b');\n"
+                  "-- 注释里的分号不该切: 1;\n"
+                  "INSERT INTO probe_c VALUES (\"c;d\");\n")
+        parts = core.sql_statements(script)
+        self.assertEqual(len(parts), 6, parts)
+        self.assertTrue(parts[0].startswith('CREATE TABLE probe_a'))
+        self.assertTrue(parts[1].startswith('CREATE TABLE probe_b'))
+        self.assertEqual(parts[4].count(';'), 1, parts[4])
+
+    def test_migration_with_two_statements_on_one_line(self):
+        with tempfile.TemporaryDirectory(prefix='mig-', dir=Path(__file__).resolve().parent) as tmp:
+            folder = Path(tmp)
+            (folder / '013_multi.sql').write_text(
+                "CREATE TABLE probe_a(id INTEGER); CREATE TABLE probe_b(id INTEGER);\n"
+                "INSERT INTO probe_a VALUES (1); INSERT INTO probe_b VALUES (2);\n"
+                "CREATE TABLE probe_c(note TEXT); INSERT INTO probe_c VALUES ('a;b');\n",
+                encoding='utf-8')
+            with self.store.write() as db:
+                core.apply_migrations(db, folder)
+            with self.store.read() as db:
+                names = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                for name in ('probe_a', 'probe_b', 'probe_c'):
+                    self.assertIn(name, names)
+                self.assertEqual(db.execute('SELECT note FROM probe_c').fetchone()[0], 'a;b')
+                self.assertIsNotNone(db.execute('SELECT 1 FROM schema_version WHERE version=13').fetchone())
+
     def test_failed_migration_rolls_back_and_can_be_retried(self):
         with tempfile.TemporaryDirectory(prefix='mig-', dir=Path(__file__).resolve().parent) as tmp:
             folder = Path(tmp)
