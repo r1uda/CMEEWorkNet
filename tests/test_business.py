@@ -12,8 +12,8 @@ from unittest.mock import patch
 import xml.etree.ElementTree as ET
 import zipfile
 
-from app import ai, auth, mailer, service
-from app.core import CAPS, SLOTS, TZ, Problem, Store, digest, js, member_by_id, now, row, rows, uid
+from app import ai, auth, core, mailer, public_swap, service
+from app.core import CAPS, SLOTS, TZ, Problem, Store, audit, digest, js, member_by_id, now, row, rows, uid
 from app.server import App
 from app.xlsx import NS, read_schedule, workbook
 
@@ -71,11 +71,129 @@ class BusinessTests(unittest.TestCase):
         with self.store.read() as db:
             self.assertEqual(row(db, 'SELECT status FROM outbox')['status'], 'canceled')
 
+    def test_sql_statements_split_on_boundaries(self):
+        script = ("CREATE TABLE probe_a(id INTEGER); CREATE TABLE probe_b(id INTEGER);\n"
+                  "INSERT INTO probe_a VALUES (1);\n"
+                  "CREATE TABLE probe_c(note TEXT); INSERT INTO probe_c VALUES ('a;b');\n"
+                  "-- 注释里的分号不该切: 1;\n"
+                  "INSERT INTO probe_c VALUES (\"c;d\");\n")
+        parts = core.sql_statements(script)
+        self.assertEqual(len(parts), 6, parts)
+        self.assertTrue(parts[0].startswith('CREATE TABLE probe_a'))
+        self.assertTrue(parts[1].startswith('CREATE TABLE probe_b'))
+        self.assertEqual(parts[4].count(';'), 1, parts[4])
+
+    def test_migration_executes_trigger_then_following_statement(self):
+        script = ("CREATE TABLE t(x INTEGER);\n"
+                  "CREATE TABLE log(x INTEGER);\n"
+                  "CREATE TRIGGER log_insert AFTER INSERT ON t"
+                  " BEGIN INSERT INTO log VALUES(NEW.x); END;\n"
+                  "INSERT INTO t VALUES(7);\n")
+        with tempfile.TemporaryDirectory(prefix='mig-', dir=Path(__file__).resolve().parent) as tmp:
+            folder = Path(tmp)
+            (folder / '014_trigger.sql').write_text(script, encoding='utf-8')
+            with self.store.write() as db:
+                core.apply_migrations(db, folder)
+            with self.store.read() as db:
+                self.assertEqual(db.execute('SELECT x FROM log').fetchone()[0], 7)
+                self.assertIsNotNone(db.execute('SELECT 1 FROM schema_version WHERE version=14').fetchone())
+
+    def test_migration_names_and_comments_containing_trigger(self):
+        script = ("CREATE TABLE trigger_log(id INTEGER); INSERT INTO trigger_log VALUES(1);\n"
+                  "-- trigger 只是注释里的词，不该影响切分\n"
+                  "INSERT INTO trigger_log VALUES(2);\n")
+        with tempfile.TemporaryDirectory(prefix='mig-', dir=Path(__file__).resolve().parent) as tmp:
+            folder = Path(tmp)
+            (folder / '015_trigger_name.sql').write_text(script, encoding='utf-8')
+            with self.store.write() as db:
+                core.apply_migrations(db, folder)
+            with self.store.read() as db:
+                values = [r[0] for r in db.execute('SELECT id FROM trigger_log ORDER BY id')]
+                self.assertEqual(values, [1, 2])
+                self.assertIsNotNone(db.execute('SELECT 1 FROM schema_version WHERE version=15').fetchone())
+
+    def test_migration_with_two_statements_on_one_line(self):
+        with tempfile.TemporaryDirectory(prefix='mig-', dir=Path(__file__).resolve().parent) as tmp:
+            folder = Path(tmp)
+            (folder / '013_multi.sql').write_text(
+                "CREATE TABLE probe_a(id INTEGER); CREATE TABLE probe_b(id INTEGER);\n"
+                "INSERT INTO probe_a VALUES (1); INSERT INTO probe_b VALUES (2);\n"
+                "CREATE TABLE probe_c(note TEXT); INSERT INTO probe_c VALUES ('a;b');\n",
+                encoding='utf-8')
+            with self.store.write() as db:
+                core.apply_migrations(db, folder)
+            with self.store.read() as db:
+                names = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                for name in ('probe_a', 'probe_b', 'probe_c'):
+                    self.assertIn(name, names)
+                self.assertEqual(db.execute('SELECT note FROM probe_c').fetchone()[0], 'a;b')
+                self.assertIsNotNone(db.execute('SELECT 1 FROM schema_version WHERE version=13').fetchone())
+
+    def test_failed_migration_rolls_back_and_can_be_retried(self):
+        with tempfile.TemporaryDirectory(prefix='mig-', dir=Path(__file__).resolve().parent) as tmp:
+            folder = Path(tmp)
+            broken = folder / '012_probe.sql'
+            broken.write_text('CREATE TABLE review_probe(id INTEGER);\nINSERT INTO missing_table VALUES(1);\n', encoding='utf-8')
+            with self.assertRaises(sqlite3.OperationalError):
+                with self.store.write() as db:
+                    core.apply_migrations(db, folder)
+            with self.store.read() as db:
+                self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='review_probe'").fetchone())
+                self.assertIsNone(db.execute('SELECT 1 FROM schema_version WHERE version=12').fetchone())
+            broken.write_text('CREATE TABLE review_probe(id INTEGER);\n', encoding='utf-8')
+            with self.store.write() as db:
+                core.apply_migrations(db, folder)
+            with self.store.read() as db:
+                self.assertIsNotNone(db.execute('SELECT 1 FROM schema_version WHERE version=12').fetchone())
+                self.assertIsNotNone(db.execute("SELECT name FROM sqlite_master WHERE name='review_probe'").fetchone())
+
     def test_home_order_rejects_invalid_blocks(self):
         for order in (None, [], ['pending'] * 6, list(service.HOME_BLOCKS[:-1]) + ['stats'], [{}] * 6):
             with self.subTest(order=order), self.store.write() as db:
                 with self.assertRaises(Problem):
                     service.save_home_order(db, self.user, {'order': order})
+
+    def test_client_ip_trusts_forwarded_only_from_loopback(self):
+        self.assertEqual(App.client_ip({'REMOTE_ADDR': '127.0.0.1', 'HTTP_X_FORWARDED_FOR': '203.0.113.9, 10.0.0.1'}), '203.0.113.9')
+        self.assertEqual(App.client_ip({'REMOTE_ADDR': '198.51.100.7', 'HTTP_X_FORWARDED_FOR': '203.0.113.9'}), '198.51.100.7')
+        self.assertEqual(App.client_ip({'REMOTE_ADDR': '127.0.0.1'}), '127.0.0.1')
+
+    def test_static_asset_supports_conditional_request(self):
+        def fetch(path, extra=None):
+            environ = {'REQUEST_METHOD': 'GET', 'PATH_INFO': path, 'QUERY_STRING': '',
+                       'wsgi.input': io.BytesIO(b''), 'CONTENT_LENGTH': '0'}
+            if extra:
+                environ.update(extra)
+            seen = {}
+            def start(status, headers):
+                seen.update(status=int(status.split()[0]), headers=dict(headers))
+            return seen, b''.join(App(self.store)(environ, start))
+        first, body = fetch('/app.js')
+        self.assertEqual(first['status'], 200)
+        self.assertTrue(body)
+        etag = first['headers'].get('ETag')
+        self.assertTrue(etag)
+        self.assertEqual(first['headers'].get('Cache-Control'), 'no-cache')
+        second, empty = fetch('/app.js', {'HTTP_IF_NONE_MATCH': etag})
+        self.assertEqual(second['status'], 304)
+        self.assertEqual(empty, b'')
+
+    def test_audit_detail_is_truncated(self):
+        with self.store.write() as db:
+            audit(db, 'm01', 'settings.save', {'payload': 'x' * 8000})
+        with self.store.read() as db:
+            detail = json.loads(row(db, "SELECT detail FROM audit WHERE action='settings.save'")['detail'])
+        self.assertTrue(detail.get('truncated'))
+        self.assertLess(len(detail['preview']), 4000)
+
+    def test_public_swap_audience_is_cleaned_when_canceled(self):
+        shift = self.shift(member='m01', date=self.today + dt.timedelta(days=5))
+        with self.store.write() as db:
+            created = public_swap.create(db, self.admin, dict(shift_id=shift, version=1, mail_audience=['m02']))
+            key = 'public_swap_mail_audience:' + created['id']
+            self.assertIsNotNone(row(db, 'SELECT value FROM settings WHERE key=?', (key,)))
+            public_swap.cancel(db, self.admin, dict(id=created['id']))
+            self.assertIsNone(row(db, 'SELECT value FROM settings WHERE key=?', (key,)))
 
     def shift(self,member='m02',date=None,slot=0):
         ident=uid()

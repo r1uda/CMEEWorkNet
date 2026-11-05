@@ -3,5 +3,8 @@
     request_body {
         max_size 12MB
     }
-    reverse_proxy 127.0.0.1:8765
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8765 {
+        trusted_proxies 127.0.0.1/32 ::1
+    }
 }

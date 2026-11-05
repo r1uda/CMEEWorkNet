@@ -15,13 +15,19 @@ def create_session(db,member):
     return dict(token=token,csrf=csrf)
 
 
-def session_member(db,token):
+def session_member(db,token,touch=True):
     if not token:
         return None
     result = row(db,'SELECT m.*,s.csrf,s.last_seen FROM sessions s JOIN members m ON m.id=s.member_id WHERE s.token_hash=? AND s.expires_at>? AND m.active=1',(digest(token),now()))
-    if result and result['last_seen'][:10]!=now()[:10]:
-        db.execute('UPDATE sessions SET last_seen=?,expires_at=? WHERE token_hash=?',(now(),(dt.datetime.now(TZ)+dt.timedelta(days=90)).isoformat(timespec='seconds'),digest(token)))
+    if touch and result and result['last_seen'][:10]!=now()[:10]:
+        touch_session(db,token)
     return result
+
+
+def touch_session(db,token):
+    """Sliding expiry: extend once per day, under a short write transaction."""
+    db.execute('UPDATE sessions SET last_seen=?,expires_at=? WHERE token_hash=?',
+               (now(),(dt.datetime.now(TZ)+dt.timedelta(days=90)).isoformat(timespec='seconds'),digest(token)))
 
 
 def request_code(store,body):

@@ -58,15 +58,22 @@ class App:
         self.rate_lock = threading.Lock()
         self.rates = {}
 
-    def rate_limit(self,environ):
-        key = environ.get('REMOTE_ADDR','unknown')
+    @staticmethod
+    def client_ip(environ):
+        """X-Forwarded-For is trusted only when the peer really is a local reverse proxy."""
+        peer = environ.get('REMOTE_ADDR','') or 'unknown'
+        forwarded = (environ.get('HTTP_X_FORWARDED_FOR') or '').split(',')[0].strip()
+        return forwarded if forwarded and peer in ('127.0.0.1','::1') else peer
+
+    def rate_limit(self,environ,bucket='auth',limit=60):
+        key = (bucket,self.client_ip(environ))
         minute = int(time.time()//60)
         with self.rate_lock:
             self.rates = {k:v for k,v in self.rates.items() if v[0]>=minute-1}
             previous,count = self.rates.get(key,(minute,0))
             count = count+1 if previous==minute else 1
             self.rates[key] = (minute,count)
-            require(count<=20,'登录请求过于频繁，请稍后再试',429)
+            require(count<=limit,'请求过于频繁，请稍后再试',429)
 
     def __call__(self,environ,start_response):
         try:
@@ -83,7 +90,10 @@ class App:
         if not any(k.lower()=='content-type' for k,v in headers):
             headers.append(('Content-Type','application/json; charset=utf-8'))
         headers.extend([('Content-Length',str(len(content))),('X-Content-Type-Options','nosniff'),('Referrer-Policy','same-origin'),
-            ('X-Frame-Options','DENY'),('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"),('Cache-Control','no-store')])
+            ('X-Frame-Options','DENY'),('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"),
+            ('Permissions-Policy','camera=(), microphone=(), geolocation=()'),('Strict-Transport-Security','max-age=31536000')])
+        if not any(k.lower()=='cache-control' for k,v in headers):
+            headers.append(('Cache-Control','no-store'))
         reasons = {200:'OK',201:'Created',400:'Bad Request',401:'Unauthorized',403:'Forbidden',404:'Not Found',405:'Method Not Allowed',409:'Conflict',413:'Content Too Large',429:'Too Many Requests',500:'Internal Server Error',502:'Bad Gateway',503:'Service Unavailable'}
         start_response(f'{status} {reasons.get(status,"Error")}',headers)
         return content if isinstance(content,FileDownload) else [content]
@@ -108,7 +118,12 @@ class App:
             file = ROOT/'app/static'/files[path]
             require(file.is_file(),'页面尚未准备完成',503)
             mime = {'.js':'text/javascript','.webmanifest':'application/manifest+json','.svg':'image/svg+xml'}.get(file.suffix,mimetypes.guess_type(str(file))[0] or 'text/plain')
-            return 200,[('Content-Type',mime+'; charset=utf-8')],file.read_bytes()
+            data = file.read_bytes()
+            etag = '"%s"' % hashlib.sha1(data).hexdigest()[:20]
+            cache = [('ETag',etag),('Cache-Control','no-cache')]
+            if e.get('HTTP_IF_NONE_MATCH')==etag:
+                return 304,cache,b''
+            return 200,[('Content-Type',mime+'; charset=utf-8')]+cache,data
         require(path.startswith('/api/'),'接口不存在',404)
         body = {}
         if method=='POST':
@@ -127,11 +142,11 @@ class App:
         if route=='health' and method=='GET':
             return 200,[],js(dict(ok=True)).encode()
         if route=='auth/code' and method=='POST':
-            self.rate_limit(e)
+            self.rate_limit(e,'auth',60)
             require(not self.demo,'演示模式不发送邮件')
             return 200,[],js(auth.request_code(self.store,body)).encode()
         if route=='auth/verify' and method=='POST':
-            self.rate_limit(e)
+            self.rate_limit(e,'auth',60)
             require(not self.demo,'演示模式请使用演示成员入口')
             result = auth.verify_code(self.store,body)
             return 200,[self.cookie(result.pop('token'))],js(result).encode()
@@ -146,8 +161,11 @@ class App:
         except Exception:
             pass
         token = cookies['wb_session'].value if 'wb_session' in cookies else None
-        with self.store.write() as db:
-            member = auth.session_member(db,token)
+        with self.store.read() as db:
+            member = auth.session_member(db,token,touch=False)
+        if member and member['last_seen'][:10]!=now()[:10]:
+            with self.store.write() as db:
+                auth.touch_session(db,token)
         if route=='bootstrap' and method=='GET':
             with self.store.read() as db:
                 setup = bool(db.execute('SELECT 1 FROM members WHERE email IS NOT NULL LIMIT 1').fetchone())
@@ -158,6 +176,7 @@ class App:
         require(member,'请先使用已绑定邮箱登录',401)
         if method=='POST':
             require(hmac.compare_digest(e.get('HTTP_X_CSRF_TOKEN',''),member['csrf']),'会话校验失败，请刷新页面',403)
+            self.rate_limit(e,'write',120)
         if route=='auth/logout' and method=='POST':
             with self.store.write() as db:
                 db.execute('DELETE FROM sessions WHERE token_hash=?',(digest(token),))

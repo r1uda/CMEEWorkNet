@@ -71,6 +71,110 @@ def slot_end(shift):
     return dt.datetime.fromisoformat(f"{shift['date']}T{SLOTS[shift['slot']]['end']}:00+08:00")
 
 
+def sql_statements(script):
+    """Split a .sql file into complete statements.
+
+    Splits on real statement boundaries, not on lines: two statements on one line
+    must become two, because db.execute() rejects a string holding more than one.
+    Quotes, [identifiers], -- line comments and /* block comments */ are skipped,
+    and each candidate is judged with sqlite3.complete_statement(text + ';'), which keeps
+    a CREATE TRIGGER body whole until its final END; and never splits inside it.
+    """
+    statements = []
+    buffer = []
+    quote = None
+    in_line_comment = in_block_comment = False
+    index, length = 0, len(script)
+    while index < length:
+        char = script[index]
+        following = script[index + 1] if index + 1 < length else ''
+        if in_line_comment:
+            buffer.append(char)
+            if char == '\n':
+                in_line_comment = False
+            index += 1
+            continue
+        if in_block_comment:
+            buffer.append(char)
+            if char == '*' and following == '/':
+                buffer.append(following)
+                index += 2
+                in_block_comment = False
+                continue
+            index += 1
+            continue
+        if quote:
+            buffer.append(char)
+            if char == quote:
+                if following == quote:
+                    buffer.append(following)
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if char == '-' and following == '-':
+            buffer.extend((char, following))
+            index += 2
+            in_line_comment = True
+            continue
+        if char == '/' and following == '*':
+            buffer.extend((char, following))
+            index += 2
+            in_block_comment = True
+            continue
+        if char in ("'", '"', '`'):
+            quote = char
+            buffer.append(char)
+            index += 1
+            continue
+        if char == '[':
+            quote = ']'
+            buffer.append(char)
+            index += 1
+            continue
+        if char == ';':
+            text = ''.join(buffer)
+            # Judge the candidate WITH its terminator: inside a CREATE TRIGGER body the
+            # text is not yet complete, so every inner semicolon keeps accumulating and
+            # the trigger ends exactly at its END;. No keyword matching, so a table
+            # called trigger_log or a comment mentioning trigger changes nothing.
+            if not sqlite3.complete_statement(text + ';'):
+                buffer.append(char)
+                index += 1
+                continue
+            statement = text.strip()
+            if statement:
+                statements.append(statement)
+            buffer = []
+            index += 1
+            continue
+        buffer.append(char)
+        index += 1
+    tail = ''.join(buffer).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+def apply_migrations(db, folder):
+    """Run pending migrations inside the caller's transaction.
+
+    executescript() would implicitly commit the surrounding transaction, so a failure
+    halfway left partial DDL behind. Executing statement by statement keeps the
+    migration and its schema_version row atomic: either both land or neither does.
+    """
+    current = db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]
+    require(current <= CURRENT_SCHEMA_VERSION, '数据库版本高于当前应用，请使用对应版本的代码')
+    for migration in sorted(Path(folder).glob('*.sql')):
+        version = int(migration.name.split('_', 1)[0])
+        if db.execute('SELECT 1 FROM schema_version WHERE version=?', (version,)).fetchone():
+            continue
+        for statement in sql_statements(migration.read_text('utf-8')):
+            db.execute(statement)
+        db.execute('INSERT INTO schema_version VALUES (?)', (version,))
+
+
 class Store:
     def __init__(self, path):
         self.path = str(path)
@@ -110,14 +214,7 @@ class Store:
             db.executescript((ROOT / 'app/schema.sql').read_text('utf-8'))
             db.commit()
         with self.write() as db:
-            current = db.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]
-            require(current <= CURRENT_SCHEMA_VERSION, '数据库版本高于当前应用，请使用对应版本的代码')
-            for migration in sorted((ROOT / 'app/migrations').glob('*.sql')):
-                version = int(migration.name.split('_', 1)[0])
-                if not db.execute('SELECT 1 FROM schema_version WHERE version=?', (version,)).fetchone():
-                    for statement in migration.read_text('utf-8').split(';'):
-                        if statement.strip(): db.execute(statement)
-                    db.execute('INSERT INTO schema_version VALUES (?)', (version,))
+            apply_migrations(db, ROOT / 'app/migrations')
             for i, name in enumerate(NAMES):
                 db.execute('INSERT OR IGNORE INTO members(id,name) VALUES (?,?)', (f'm{i+1:02}', name))
             for key, value in [('activation_date', None), ('share_records', False), ('share_schedule', False), ('ai_consent', False), ('escalation_recipient', None)]:
@@ -138,8 +235,15 @@ def setting(db, key):
     return json.loads(result['value']) if result else None
 
 
+AUDIT_DETAIL_LIMIT = 4000
+
+
 def audit(db, actor, action, detail):
-    db.execute('INSERT INTO audit VALUES (?,?,?,?,?)', (uid(), actor, action, js(detail), now()))
+    # A few endpoints pass whole request bodies here; keep the table small and readable.
+    text = js(detail)
+    if len(text) > AUDIT_DETAIL_LIMIT:
+        text = js(dict(truncated=True, size=len(text), preview=text[:AUDIT_DETAIL_LIMIT - 200]))
+    db.execute('INSERT INTO audit VALUES (?,?,?,?,?)', (uid(), actor, action, text, now()))
 
 
 def can(member, capability):
