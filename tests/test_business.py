@@ -83,6 +83,35 @@ class BusinessTests(unittest.TestCase):
         self.assertTrue(parts[1].startswith('CREATE TABLE probe_b'))
         self.assertEqual(parts[4].count(';'), 1, parts[4])
 
+    def test_migration_executes_trigger_then_following_statement(self):
+        script = ("CREATE TABLE t(x INTEGER);\n"
+                  "CREATE TABLE log(x INTEGER);\n"
+                  "CREATE TRIGGER log_insert AFTER INSERT ON t"
+                  " BEGIN INSERT INTO log VALUES(NEW.x); END;\n"
+                  "INSERT INTO t VALUES(7);\n")
+        with tempfile.TemporaryDirectory(prefix='mig-', dir=Path(__file__).resolve().parent) as tmp:
+            folder = Path(tmp)
+            (folder / '014_trigger.sql').write_text(script, encoding='utf-8')
+            with self.store.write() as db:
+                core.apply_migrations(db, folder)
+            with self.store.read() as db:
+                self.assertEqual(db.execute('SELECT x FROM log').fetchone()[0], 7)
+                self.assertIsNotNone(db.execute('SELECT 1 FROM schema_version WHERE version=14').fetchone())
+
+    def test_migration_names_and_comments_containing_trigger(self):
+        script = ("CREATE TABLE trigger_log(id INTEGER); INSERT INTO trigger_log VALUES(1);\n"
+                  "-- trigger 只是注释里的词，不该影响切分\n"
+                  "INSERT INTO trigger_log VALUES(2);\n")
+        with tempfile.TemporaryDirectory(prefix='mig-', dir=Path(__file__).resolve().parent) as tmp:
+            folder = Path(tmp)
+            (folder / '015_trigger_name.sql').write_text(script, encoding='utf-8')
+            with self.store.write() as db:
+                core.apply_migrations(db, folder)
+            with self.store.read() as db:
+                values = [r[0] for r in db.execute('SELECT id FROM trigger_log ORDER BY id')]
+                self.assertEqual(values, [1, 2])
+                self.assertIsNotNone(db.execute('SELECT 1 FROM schema_version WHERE version=15').fetchone())
+
     def test_migration_with_two_statements_on_one_line(self):
         with tempfile.TemporaryDirectory(prefix='mig-', dir=Path(__file__).resolve().parent) as tmp:
             folder = Path(tmp)

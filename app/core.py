@@ -77,8 +77,8 @@ def sql_statements(script):
     Splits on real statement boundaries, not on lines: two statements on one line
     must become two, because db.execute() rejects a string holding more than one.
     Quotes, [identifiers], -- line comments and /* block comments */ are skipped,
-    and a CREATE TRIGGER body is kept whole until sqlite3.complete_statement says
-    the trigger has ended.
+    and each candidate is judged with sqlite3.complete_statement(text + ';'), which keeps
+    a CREATE TRIGGER body whole until its final END; and never splits inside it.
     """
     statements = []
     buffer = []
@@ -135,7 +135,11 @@ def sql_statements(script):
             continue
         if char == ';':
             text = ''.join(buffer)
-            if 'trigger' in text.lower() and not sqlite3.complete_statement(text):
+            # Judge the candidate WITH its terminator: inside a CREATE TRIGGER body the
+            # text is not yet complete, so every inner semicolon keeps accumulating and
+            # the trigger ends exactly at its END;. No keyword matching, so a table
+            # called trigger_log or a comment mentioning trigger changes nothing.
+            if not sqlite3.complete_statement(text + ';'):
                 buffer.append(char)
                 index += 1
                 continue
