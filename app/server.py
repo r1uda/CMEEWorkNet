@@ -102,12 +102,12 @@ class App:
             return 200,[('Content-Type','application/vnd.android.package-archive'),
                 ('Content-Disposition','attachment; filename="quill-0.1.5-android-arm64.apk"')],FileDownload(QUILL_APK)
         if method=='GET' and not path.startswith('/api/'):
-            files = {'/':'index.html','/app.js':'app.js','/style.css':'style.css','/manifest.webmanifest':'manifest.webmanifest','/sw.js':'sw.js','/icon.svg':'icon.svg','/college-logo.png':'college-logo.png'}
+            files = {'/':'index.html','/app.js':'app.js','/style.css':'style.css','/manifest.webmanifest':'manifest.webmanifest','/sw.js':'sw.js','/icon.svg':'icon.svg','/college-logo.png':'college-logo.png','/college-logo.webp':'college-logo.webp'}
             files.update({f'/quill/{name}.png':f'quill/{name}.png' for name in ('icon','home','excel','birthdays','widgets')})
             require(path in files,'页面不存在',404)
             file = ROOT/'app/static'/files[path]
             require(file.is_file(),'页面尚未准备完成',503)
-            mime = {'.js':'text/javascript','.webmanifest':'application/manifest+json','.svg':'image/svg+xml'}.get(file.suffix,mimetypes.guess_type(str(file))[0] or 'text/plain')
+            mime = {'.js':'text/javascript','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.webp':'image/webp'}.get(file.suffix,mimetypes.guess_type(str(file))[0] or 'text/plain')
             return 200,[('Content-Type',mime+'; charset=utf-8')],file.read_bytes()
         require(path.startswith('/api/'),'接口不存在',404)
         body = {}
