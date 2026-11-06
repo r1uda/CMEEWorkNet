@@ -7,7 +7,8 @@ const context = vm.createContext({
   console, crypto:require('node:crypto').webcrypto, structuredClone, URLSearchParams,
   setTimeout:()=>0,clearTimeout:()=>{},setInterval:()=>0,
   location:{hash:'#register'},history:{replaceState(){}},
-  document:{styleSheets:[],documentElement:{dataset:{}},addEventListener(){},querySelector:s=>s==='#layout-switch'?{addEventListener(){}}:null,querySelectorAll:()=>[]},
+  CustomEvent:class CustomEvent{constructor(type,init={}){this.type=type;this.detail=init.detail}},
+  document:{styleSheets:[],documentElement:{dataset:{}},addEventListener(){},dispatchEvent(){return true},querySelector:s=>s==='#layout-switch'?{addEventListener(){}}:null,querySelectorAll:()=>[]},
   window:{addEventListener:(name,fn)=>handlers[name]=fn,scrollTo(){}},
   form,handlers,assert,
 });

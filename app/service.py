@@ -34,7 +34,14 @@ def state(db, member, filters=None):
     all_shifts = bool(setting(db, 'share_schedule')) or can(member, 'can_manage_schedule') or can(member,'can_manage_members')
     me = dict(member)
     me['caps'] = json.loads(me['caps'])
-    me['home_order'] = setting(db, 'home_order:' + member['id']) or []
+    preference = setting(db, 'home_order:' + member['id']) or []
+    # Older rows stored a bare order array; newer rows store {order, hidden}.
+    if isinstance(preference, dict):
+        me['home_order'] = preference.get('order') or []
+        me['home_hidden'] = preference.get('hidden') or []
+    else:
+        me['home_order'] = preference
+        me['home_hidden'] = []
     members = rows(db, 'SELECT id,name' + (',email,caps,active' if can(member, 'can_manage_members') else '') + ' FROM members ORDER BY rowid')
     for person in members:
         person['duties'] = DUTIES.get(person['id'], '')
@@ -100,9 +107,19 @@ def save_home_order(db, member, body):
     require(isinstance(order, list) and len(order) == len(HOME_BLOCKS)
             and all(isinstance(item, str) for item in order)
             and set(order) == set(HOME_BLOCKS), '板块顺序无效，请刷新后重试')
+    hidden = body.get('hidden', [])
+    require(isinstance(hidden, list) and all(isinstance(item, str) for item in hidden)
+            and set(hidden) <= set(HOME_BLOCKS), '隐藏板块无效，请刷新后重试')
+    value = dict(order=order, hidden=[name for name in HOME_BLOCKS if name in hidden])
     db.execute('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
-               ('home_order:' + member['id'], js(order)))
-    return dict(order=order)
+               ('home_order:' + member['id'], js(value)))
+    return dict(order=order, hidden=value['hidden'])
+
+
+def history_signature(record):
+    tasks = [(t.get('id') or t.get('text'), t.get('text'), t.get('status')) for t in record.get('tasks', [])]
+    return js(dict(state=record.get('state'), notes=record.get('notes'), date=record.get('date'),
+                   slot=record.get('slot'), tasks=tasks))
 
 
 def save_record(db, member, body, *, administrative=False):
@@ -162,7 +179,11 @@ def save_record(db, member, body, *, administrative=False):
     submitted_at = (previous['submitted_at'] if previous else None) or (stamp if desired_state == 'submitted' else None)
     if previous:
         if administrative:
-            db.execute('INSERT INTO record_history VALUES (?,?,?,?,?)',(uid(),record_id,member['id'],js(record_view(db,previous)),stamp))
+            prior = record_view(db, previous)
+            prior_last = row(db,'SELECT snapshot FROM record_history WHERE registration_id=?'
+                             ' ORDER BY created_at DESC,rowid DESC LIMIT 1',(record_id,))
+            if not prior_last or history_signature(json.loads(prior_last['snapshot'])) != history_signature(prior):
+                db.execute('INSERT INTO record_history VALUES (?,?,?,?,?)',(uid(),record_id,member['id'],js(prior),stamp))
         db.execute('UPDATE registrations SET date=?,slot=?,state=?,notes=?,version=version+1,updated_at=?,submitted_at=? WHERE id=?', (date,slot,desired_state,notes,stamp,submitted_at,record_id))
     else:
         require(not shift_id or not row(db,'SELECT id FROM registrations WHERE shift_id=?',(shift_id,)), '该班次已有登记，请打开原记录修改',409)
@@ -175,7 +196,13 @@ def save_record(db, member, body, *, administrative=False):
             db.execute('INSERT INTO tasks VALUES (?,?,?,?,1,?)',(task_id,record_id,text,status,owner_id))
         db.execute('INSERT INTO task_positions VALUES (?,?) ON CONFLICT(task_id) DO UPDATE SET position=excluded.position',(task_id,position))
     saved = record_view(db,row(db,'SELECT * FROM registrations WHERE id=?',(record_id,)))
-    db.execute('INSERT INTO record_history VALUES (?,?,?,?,?)',(uid(),record_id,member['id'],js(saved),stamp))
+    # Draft autosaves fire on every keystroke pause; only submitted states deserve a version.
+    # A save that changes nothing must not add a version either.
+    if desired_state == 'submitted':
+        last = row(db,'SELECT snapshot FROM record_history WHERE registration_id=?'
+                       ' ORDER BY created_at DESC,rowid DESC LIMIT 1',(record_id,))
+        if not last or history_signature(json.loads(last['snapshot'])) != history_signature(saved):
+            db.execute('INSERT INTO record_history VALUES (?,?,?,?,?)',(uid(),record_id,member['id'],js(saved),stamp))
     if shift_id and desired_state == 'submitted':
         invalidate_mail(db,shift_id)
     audit(db,member['id'],'record.admin_edit' if administrative else 'record.save',dict(id=record_id,state=desired_state,version=saved['version'],reason=body.get('change_reason','') if administrative else ''))
