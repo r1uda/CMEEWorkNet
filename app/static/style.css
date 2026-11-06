@@ -197,3 +197,21 @@ dialog[open]{display:flex;flex-direction:column;max-height:calc(100dvh - 24px);o
 @media(max-width:760px){.page-head{margin-bottom:14px}.page-head .subtitle{display:none}.page-head h1{font-size:22px}}
 
 .handoff-lock{font-size:11px;color:var(--muted)}
+
+/* 换班请求：一条三行，说明折叠 */
+.swap-item{padding:14px 22px}
+.swap-item+.swap-item,.fold .swap-item{border-top:1px solid var(--line)}
+.swap-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.swap-head strong{font-size:13px;font-weight:600}
+.swap-sub{margin-top:4px;font-size:12px;color:var(--muted)}
+.swap-reply{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px}
+.swap-reply-acts{margin-left:auto;display:flex;gap:6px}
+.swap-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:12px}
+.swap-foot .text-button{margin-left:auto}
+.swap-detail{margin-top:8px;font-size:12px;color:var(--muted)}
+.swap-detail summary{list-style:none;cursor:pointer;color:var(--muted)}
+.swap-detail summary::-webkit-details-marker{display:none}
+.swap-detail summary::after{content:' ▾'}
+.swap-detail[open] summary::after{content:' ▴'}
+.swap-detail .subtitle{margin:8px 0 0;font-size:12px}
+@media(max-width:760px){.swap-item{padding:12px 15px}}
