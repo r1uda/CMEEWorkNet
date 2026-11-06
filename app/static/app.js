@@ -150,7 +150,7 @@ function personalSwapModal(id){
 }
 function publicMailHint(){return S.boot.demo?'演示环境不发邮件。':({off:'当前仅站内通知，不发邮件。',test:'邮件测试中：仅通知李宥达、黄晋宜，其他成员不收邮件。',all:'发布后通知其他成员；收到回复时只通知发起人；确认后分别通知回复者。'})[S.data.settings.public_swap_mail_mode||'off']}
 function publicReplyKind(o){return o.reply_kind||(o.target_shift_id?'exchange':'cover')}
-function publicReplyText(o){return publicReplyKind(o)==='undecided'?'愿意交换，具体班次待定':o.target_shift_id?'希望用 '+o.target_date+' '+slotLabel(o.target_slot)+' 交换':'仅代班，不交换自己的班次'}
+function publicReplyText(o){return publicReplyKind(o)==='undecided'?'愿意交换，具体班次待定':o.target_shift_id?'希望用 '+fmt(o.target_date,{month:'numeric',day:'numeric'})+' '+slotLabel(o.target_slot)+' 交换':'仅代班，不交换自己的班次'}
 function publicReplyState(o){return ({active:publicReplyKind(o)==='undecided'?'班次待定':'等待发起人确认',selected:'已确认',not_selected:'已选择其他人',stale:'班次已不可用',withdrawn:'已撤回'})[o.state]}
 function visiblePublicReplies(p){return p.offers.filter(o=>o.state!=='withdrawn')}
 function publicSwapModal(id){
